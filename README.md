@@ -3,7 +3,7 @@ Raspberry Pi upload to Google Drive
 
 I created the project because I wanted to view the images created with the Raspberry Pi Camera everywhere where I am without having to deal with the security issues using port forwarding and my own webserver.
 
-The images created are in the subfolder timelapse/year/month/day. The script looks into the
+The images created are in the subfolder timelapse/year/month/day.
 
 #Requirements
 
@@ -17,7 +17,9 @@ I am using a service account key because this script runs unattended as a cronjo
 #Configuration
 
 Configuration file is image-upload.config.
-The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded. Therefore there is no need to touch that file. Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
+The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded.
+Therefore there is no need to touch that file.
+Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
 
 The configuration to get that script running is inside the script:
 
