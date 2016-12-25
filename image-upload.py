@@ -14,17 +14,24 @@ from apiclient import errors
 from apiclient.http import MediaFileUpload
 
 
+class DriveError(Exception):
+    pass
+
 class GoogleDrive:
     """
     Handling the Google Drive Access
     """
 
     SCOPES = ['https://www.googleapis.com/auth/drive']
-    CLIENT_SECRET_FILE = 'secret-file.json'  # INSERT INFO
-    APPLICATION_NAME = 'my-image-upload'  # INSERT INFO
+    client_secret_file = ''
+    application_name = ''
     FOLDER_MIME = "application/vnd.google-apps.folder"
 
-    def __init__(self):
+    def __init__(self, secret, name):
+        if not os.path.exists(secret):
+            raise DriveError("Secret file does not exists")
+        self.client_secret_file = secret
+        self.application_name = name
         self.logger = logging.getLogger('GoogleDriveUploader')
         self.service = self.authorize()
 
@@ -37,7 +44,7 @@ class GoogleDrive:
         from oauth2client.service_account import ServiceAccountCredentials
         scopes = self.SCOPES
         credentials = ServiceAccountCredentials.from_json_keyfile_name(
-            self.CLIENT_SECRET_FILE, scopes=scopes)
+            self.client_secret_file, scopes=scopes)
         http = credentials.authorize(httplib2.Http())
         return discovery.build('drive', 'v3', http=http)
 
@@ -51,7 +58,7 @@ class GoogleDrive:
             parents = [parents]
         body = {
             'name': os.path.basename(filename),
-            'description': 'Test 1',
+            'description': '',
             'parents': parents
         }
 
@@ -78,11 +85,22 @@ class GoogleDrive:
         fid = self.service.files().create(body=body).execute()
         return fid
 
+    def share_folder_with_users(self, fileid, emails):
+        """
+        Share the folder or file with a specific user.
+        :param fileid: id of the object we want to share, can be file or folder
+        :param emails: list of email addresses of the user to share the folder with.
+        """
+        for email in emails:
+            if not self.share_folder_with_user(fileid, email):
+                return False
+        return True
+
     def share_folder_with_user(self, fileid, email):
         """
         Share the folder or file with a specific user.
         :param fileid: id of the object we want to share, can be file or folder
-        :param email: Email address of the user to share the folder with.
+        :param email: email address of the user to share the folder with.
         """
         body = {
             'role': 'writer',
@@ -155,6 +173,12 @@ class Configuration:
     def __init__(self):
         self.latest_uploaded = ''
         self.shared_year = ''
+        self.client_secret_file = ''
+        self.application_name = ''
+        self.search_directory = os.path.join(os.getcwd(), "timelapse")
+        self._share_with = []
+        self.interval = 30
+
         self.read_configuration()
 
     def read_configuration(self):
@@ -163,14 +187,18 @@ class Configuration:
         '''
         config = configparser.ConfigParser()
         config.read(self.filename)
-        self.latest_uploaded = config.get('Information', 'latest_uploaded')
+        self.latest_uploaded = config['Information']['latest_uploaded']
+        self.client_secret_file = config['Drive']['client_secret_file']
+        self.application_name = config['Drive']['application_name']
+        self.share_with = config['Drive']['share_with']
+        self.latest_uploaded = config['Application']['search_directory']
+        self.interval = int(config['Application']['interval'])
         try:
             config.get('SharedYears', self.year)
         except configparser.NoOptionError:
             pass
         else:
             self.shared_year = self.year
-
 
     def write_configuration(self):
         '''
@@ -192,15 +220,23 @@ class Configuration:
             return True
         return False
 
+    @property
+    def share_with(self):
+        """Get list of people to share the uploads with."""
+        return self._share_with
+
+    @share_with.setter
+    def share_with(self, value):
+        if value:
+            self._share_with = [i for i in value.split(',') if i]
+
 
 class ImageUpload:
 
-    home = os.path.join(os.getcwd(), "timelapse")
-
     def __init__(self):
         self.logger = logging.getLogger('GoogleDriveUploader')
-        self.drive = GoogleDrive()
         self.config = Configuration()
+        self.drive = GoogleDrive(self.config.client_secret_file, self.config.application_name)
 
     def get_latest_image(self, directory):
         '''
@@ -265,7 +301,7 @@ class ImageUpload:
         '''Returns the current date directory where the images are stored in'''
         now = datetime.datetime.now()
         path = '{0}{1}{2}{3}{4}'.format(now.year, os.sep, now.month, os.sep, now.day)
-        path = os.path.join(self.home, path)
+        path = os.path.join(self.config.search_directory, path)
         if not os.path.exists(path):
             self.logger.warning('Directory %s does not yet exists...', path)
             return None
@@ -295,7 +331,7 @@ class ImageUpload:
             files = self.drive.search_files(self.drive.FOLDER_MIME)
             for key, value in files.items():
                 if value == self.config.year:
-                    if self.drive.share_folder_with_user(key, "email"):
+                    if self.drive.share_folder_with_users(key, self.config.share_with):
                         self.logger.info("Year %s not yet shared, sharing it now and writing configuration",
                                          self.config.year)
                         self.config.shared_year = self.config.year
@@ -308,9 +344,6 @@ class ImageUpload:
         files = self.drive.search_files(self.drive.FOLDER_MIME)
         for key, value in files.items():
             self.drive.delete_file(key)
-        files = self.drive.search_files()
-        for key, value in files.items():
-            self.drive.delete_file(key)
 
     def check_for_new_images(self):
         '''
@@ -319,7 +352,7 @@ class ImageUpload:
 
         try:
             while True:
-                timer = threading.Timer(30.0, self.upload_newest_image)
+                timer = threading.Timer(self.config.interval, self.upload_newest_image)
                 timer.start()
                 timer.join()
         except KeyboardInterrupt:

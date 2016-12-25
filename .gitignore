@@ -90,3 +90,5 @@ ENV/
 
 # Do not add secret file
 *.json
+# Do not add my default configuration
+my-image-upload.config
