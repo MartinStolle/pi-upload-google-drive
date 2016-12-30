@@ -23,8 +23,6 @@ class GoogleDrive:
     """
 
     SCOPES = ['https://www.googleapis.com/auth/drive']
-    client_secret_file = ''
-    application_name = ''
     FOLDER_MIME = "application/vnd.google-apps.folder"
 
     def __init__(self, secret, name):
@@ -168,15 +166,16 @@ class GoogleDrive:
 class Configuration:
 
     filename = os.path.join(os.getcwd(), "image-upload.config")
-    year = str(datetime.datetime.now().year)
 
     def __init__(self):
+        self.logger = logging.getLogger('GoogleDriveUploader-Configuration')
         self.latest_uploaded = ''
-        self.shared_year = ''
+        self.shared_folder = ''
         self.client_secret_file = ''
         self.application_name = ''
         self.search_directory = os.path.join(os.getcwd(), "timelapse")
         self._share_with = []
+        self.date_directory = True
         self.interval = 30
 
         self.read_configuration()
@@ -191,34 +190,64 @@ class Configuration:
         self.client_secret_file = config['Drive']['client_secret_file']
         self.application_name = config['Drive']['application_name']
         self.share_with = config['Drive']['share_with']
-        self.latest_uploaded = config['Application']['search_directory']
+        self.search_directory = config['Application']['search_directory']
+        if not os.path.exists(self.search_directory):
+            self.logger.warning('Directory %s does not yet exists...', self.search_directory)
+        self.date_directory = config['Application'].getboolean('date_directory')
         self.interval = int(config['Application']['interval'])
-        try:
-            config.get('SharedYears', self.year)
-        except configparser.NoOptionError:
-            pass
-        else:
-            self.shared_year = self.year
+
+        self.log_configuration()
 
     def write_configuration(self):
         '''
         Write configuration file
         '''
         config = configparser.ConfigParser()
-        config.add_section('Information')
-        config.set('Information', 'latest_uploaded', self.latest_uploaded)
-        config.add_section('SharedYears')
-        config.set('SharedYears', self.year, '')
+        config['Information'] = {}
+        config['Information']['latest_uploaded'] = self.latest_uploaded
+
+        config['Drive'] = {}
+        config['Drive']['client_secret_file'] = self.client_secret_file
+        config['Drive']['application_name'] = self.application_name
+        config['Drive']['share_with'] = ','.join(self.share_with)
+
+        config['Application'] = {}
+        config['Application']['search_directory'] = self.search_directory
+        config['Application']['date_directory'] = str(self.date_directory)
+        config['Application']['interval'] = str(self.interval)
+
+        config['SharedFolder'] = {}
+        config['SharedFolder'][self.shared_folder] = ''
+
         with open(self.filename, 'w') as configfile:
             config.write(configfile)
 
-    def year_already_shared(self):
+    def log_configuration(self):
+        '''
+        Just log the configuration
+        '''
+        self.logger.info("latest_uploaded: %s", self.latest_uploaded)
+        self.logger.info("shared_folder: %s", self.shared_folder)
+        self.logger.info("client_secret_file: %s", self.client_secret_file)
+        self.logger.info("application_name: %s", self.application_name)
+        self.logger.info("search_directory: %s", self.search_directory)
+        self.logger.info("share_with: %s", self.share_with)
+        self.logger.info("date_directory: %s", self.date_directory)
+        self.logger.info("interval: %s", self.interval)
+
+    def folder_already_shared(self, foldername):
         '''
         We can skip the shared if the current year is already shared
         '''
-        if self.year == self.shared_year:
+        config = configparser.ConfigParser()
+        config.read(self.filename)
+        try:
+            config.get('SharedFolder', foldername)
+        except configparser.NoOptionError:
+            self.shared_folder = foldername
+            return False
+        else:
             return True
-        return False
 
     @property
     def share_with(self):
@@ -280,11 +309,11 @@ class ImageUpload:
         else:
             return resultid
 
-
-    def create_missing_folders(self, filename):
+    def create_missing_date_folders(self, filename):
         """
         Returns the ID of the day folder and creates the folder if they does not exist
         :param filename: absolute path
+        :returns: Tuple with foldername and ID
         """
         directory = os.path.dirname(filename)
         # remove the current directory
@@ -295,7 +324,20 @@ class ImageUpload:
         mid = self.get_folder_or_create_it(month, yid)
         did = self.get_folder_or_create_it(day, mid)
 
-        return did
+        return year, did
+
+    def create_missing_folder(self, filename):
+        """
+        Returns the ID of folder and creates the folder if they does not exist
+        :param filename: absolute path
+        :returns: Tuple with foldername and ID
+        """
+        directory = os.path.dirname(filename)
+        # get foldername
+        directory = directory.split(os.sep)[-1]
+        did = self.get_folder_or_create_it(directory)
+
+        return directory, did
 
     def current_date_directory(self):
         '''Returns the current date directory where the images are stored in'''
@@ -311,9 +353,13 @@ class ImageUpload:
         '''
         Looks into the timelapse directory and uploads the newest image
         '''
-        path = self.current_date_directory()
-        if not path:
-            return
+        if self.config.date_directory:
+            path = self.current_date_directory()
+            if not path:
+                return
+        else:
+            path = self.config.search_directory
+
         image = self.get_latest_image(path)
         if not image:
             return
@@ -323,18 +369,25 @@ class ImageUpload:
             self.logger.info("Image %s already uploaded, will skip this one.", image)
             return
 
-        fid = self.create_missing_folders(image)
+        fid = None
+        foldername = ''
+        if self.config.date_directory:
+            foldername, fid = self.create_missing_date_folders(image)
+        else:
+            foldername, fid = self.create_missing_folder(image)
+
         if self.drive.upload_image(image, fid):
             self.config.latest_uploaded = os.path.basename(image)
 
-        if not self.config.year_already_shared():
+        if not self.config.folder_already_shared(foldername):
             files = self.drive.search_files(self.drive.FOLDER_MIME)
             for key, value in files.items():
-                if value == self.config.year:
+                if value == self.config.shared_folder:
                     if self.drive.share_folder_with_users(key, self.config.share_with):
-                        self.logger.info("Year %s not yet shared, sharing it now and writing configuration",
-                                         self.config.year)
-                        self.config.shared_year = self.config.year
+                        self.logger.info("Folder %s not yet shared, sharing it now and writing configuration",
+                                         self.config.shared_folder)
+                    else:
+                        self.config.shared_folder = ''
         self.config.write_configuration()
 
     def __delete_all_files(self):
@@ -380,6 +433,7 @@ def main():
     upload = ImageUpload()
     #upload._ImageUpload__delete_all_files()
     upload.check_for_new_images()
+
 
 if __name__ == '__main__':
     main()
