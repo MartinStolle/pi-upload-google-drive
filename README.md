@@ -17,49 +17,31 @@ I am using a service account key because this script runs unattended as a cronjo
 #Configuration
 
 Configuration file is image-upload.config.
-The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded.
-Therefore there is no need to touch that file.
-Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
-
-The configuration to get that script running is inside the script:
 
 Add your application name and secret file.
-```python
-class GoogleDrive:
-    """
-    Handling the Google Drive Access
-    """
 
-    SCOPES = ['https://www.googleapis.com/auth/drive']
-    CLIENT_SECRET_FILE = 'secret-file.json'  # INSERT INFO
-    APPLICATION_NAME = 'my-image-upload'  # INSERT INFO
-    FOLDER_MIME = "application/vnd.google-apps.folder"
-```
-Change home if you want to search for images in another folder.
-```python
-class ImageUpload:
+`client_secret_file = secretfile.json`
 
-    home = os.path.join(os.getcwd(), "timelapse")
-```
-Change interval, default 30s.
-```python
-    def check_for_new_images(self):
-        '''
-        Runs every n seconds and checks for new images
-        '''
+`application_name = my-application-name`
 
-        try:
-            while True:
-                timer = threading.Timer(30.0, self.upload_newest_image)  # CHANGE INTERVAL
-                timer.start()
-                timer.join()
-        except KeyboardInterrupt:
-            self.logger.info("Leaving timer thread. Goodbye!")
-```
-E-Mail to share to.
-```python
-if self.drive.share_folder_with_user(key, "email"):
-```
+
+Who do you want to share the files with, should be at least your email.
+
+`share_with = foo@gmail.com,bar@gmail.com`
+
+
+Change search_directory if you want to search for images in another folder.
+
+`search_directory = /home/pi/images/`
+
+
+How often do you want to check for new images in seconds.
+
+`interval = 30`
+
+The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded.
+Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
+
 #Run
 
 `python3 image-upload.py`
