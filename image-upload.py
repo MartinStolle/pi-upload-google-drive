@@ -170,7 +170,7 @@ class Configuration:
     def __init__(self):
         self.logger = logging.getLogger('GoogleDriveUploader-Configuration')
         self.latest_uploaded = ''
-        self.shared_folder = ''
+        self._shared_folder = []
         self.client_secret_file = ''
         self.application_name = ''
         self.search_directory = os.path.join(os.getcwd(), "timelapse")
@@ -190,6 +190,7 @@ class Configuration:
         self.client_secret_file = config['Drive']['client_secret_file']
         self.application_name = config['Drive']['application_name']
         self.share_with = config['Drive']['share_with']
+        self.shared_folder = config['Drive']['shared_folder']
         self.search_directory = config['Application']['search_directory']
         if not os.path.exists(self.search_directory):
             self.logger.warning('Directory %s does not yet exists...', self.search_directory)
@@ -210,14 +211,12 @@ class Configuration:
         config['Drive']['client_secret_file'] = self.client_secret_file
         config['Drive']['application_name'] = self.application_name
         config['Drive']['share_with'] = ','.join(self.share_with)
+        config['Drive']['shared_folder'] = ','.join(self.shared_folder)
 
         config['Application'] = {}
         config['Application']['search_directory'] = self.search_directory
         config['Application']['date_directory'] = str(self.date_directory)
         config['Application']['interval'] = str(self.interval)
-
-        config['SharedFolder'] = {}
-        config['SharedFolder'][self.shared_folder] = ''
 
         with open(self.filename, 'w') as configfile:
             config.write(configfile)
@@ -235,19 +234,15 @@ class Configuration:
         self.logger.info("date_directory: %s", self.date_directory)
         self.logger.info("interval: %s", self.interval)
 
-    def folder_already_shared(self, foldername):
-        '''
-        We can skip the shared if the current year is already shared
-        '''
-        config = configparser.ConfigParser()
-        config.read(self.filename)
-        try:
-            config.get('SharedFolder', foldername)
-        except configparser.NoOptionError:
-            self.shared_folder = foldername
-            return False
-        else:
-            return True
+    @property
+    def shared_folder(self):
+        """Get list of people to share the uploads with."""
+        return self._shared_folder
+
+    @shared_folder.setter
+    def shared_folder(self, value):
+        if value:
+            self._shared_folder = [i for i in value.split(',') if i]
 
     @property
     def share_with(self):
@@ -379,15 +374,16 @@ class ImageUpload:
         if self.drive.upload_image(image, fid):
             self.config.latest_uploaded = os.path.basename(image)
 
-        if not self.config.folder_already_shared(foldername):
+        if foldername not in self.config.shared_folder:
             files = self.drive.search_files(self.drive.FOLDER_MIME)
             for key, value in files.items():
-                if value == self.config.shared_folder:
+                if value == foldername:
                     if self.drive.share_folder_with_users(key, self.config.share_with):
                         self.logger.info("Folder %s not yet shared, sharing it now and writing configuration",
-                                         self.config.shared_folder)
+                                         foldername)
+                        self.config.shared_folder.append(foldername)
                     else:
-                        self.config.shared_folder = ''
+                        self.config.shared_folder = []
         self.config.write_configuration()
 
     def __delete_all_files(self):
