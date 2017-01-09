@@ -52,7 +52,7 @@ image-upload.log
 
 #TODO
 
-Move configurable parameter, like CLIENT_SECRET_FILE or check interval time, into the configuration.
+ - Synchronize complete folder
 
 #Further reading
 
