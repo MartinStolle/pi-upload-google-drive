@@ -169,7 +169,7 @@ class Configuration:
 
     def __init__(self):
         self.logger = logging.getLogger('GoogleDriveUploader-Configuration')
-        self.latest_uploaded = ''
+        self._latest_uploaded = []
         self._shared_folder = []
         self.client_secret_file = ''
         self.application_name = ''
@@ -177,6 +177,7 @@ class Configuration:
         self._share_with = []
         self.date_directory = True
         self.interval = 30
+        self.n_last_images = 5
 
         self.read_configuration()
 
@@ -196,6 +197,7 @@ class Configuration:
             self.logger.warning('Directory %s does not yet exists...', self.search_directory)
         self.date_directory = config['Application'].getboolean('date_directory')
         self.interval = int(config['Application']['interval'])
+        self.n_last_images = int(config['Application']['n_last_images'])
 
         self.log_configuration()
 
@@ -205,7 +207,7 @@ class Configuration:
         '''
         config = configparser.ConfigParser()
         config['Information'] = {}
-        config['Information']['latest_uploaded'] = self.latest_uploaded
+        config['Information']['latest_uploaded'] = ','.join(self.latest_uploaded)
 
         config['Drive'] = {}
         config['Drive']['client_secret_file'] = self.client_secret_file
@@ -217,6 +219,7 @@ class Configuration:
         config['Application']['search_directory'] = self.search_directory
         config['Application']['date_directory'] = str(self.date_directory)
         config['Application']['interval'] = str(self.interval)
+        config['Application']['n_last_images'] = str(self.n_last_images)
 
         with open(self.filename, 'w') as configfile:
             config.write(configfile)
@@ -233,6 +236,7 @@ class Configuration:
         self.logger.info("share_with: %s", self.share_with)
         self.logger.info("date_directory: %s", self.date_directory)
         self.logger.info("interval: %s", self.interval)
+        self.logger.info("n_last_images: %s", self.n_last_images)
 
     @property
     def shared_folder(self):
@@ -254,6 +258,18 @@ class Configuration:
         if value:
             self._share_with = [i for i in value.split(',') if i]
 
+    @property
+    def latest_uploaded(self):
+        """Get list of people to share the uploads with."""
+        return self._latest_uploaded
+
+    @latest_uploaded.setter
+    def latest_uploaded(self, value):
+        if isinstance(value, str):
+            self._latest_uploaded = [i for i in value.split(',') if i]
+        elif isinstance(value, list):
+            self._latest_uploaded = value
+
 
 class ImageUpload:
 
@@ -262,18 +278,20 @@ class ImageUpload:
         self.config = Configuration()
         self.drive = GoogleDrive(self.config.client_secret_file, self.config.application_name)
 
-    def get_latest_image(self, directory):
+    def get_latest_images(self, directory, n_last_images):
         '''
-        Returns the name of the newest image in the directory
+        Returns the names of the n newest images in the directory
         '''
         latest = None
         try:
-            latest = max([os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith('.jpg')],
-                         key=os.path.getctime)
-            latest = os.path.join(directory, latest)
+            latest = sorted([os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith('.jpg')],
+                            key=os.path.getctime, reverse=True)
         except ValueError:
             self.logger.error('No images found in directory %s', directory)
-        return latest
+
+        if not latest or len(latest) == 0:
+            return None
+        return latest[0:n_last_images]
 
     def get_folder_or_create_it(self, foldername, parentid=None):
         """
@@ -344,9 +362,9 @@ class ImageUpload:
             return None
         return path
 
-    def upload_newest_image(self):
+    def upload_newest_images(self):
         '''
-        Looks into the timelapse directory and uploads the newest image
+        Looks into the timelapse directory and uploads the newest images
         '''
         if self.config.date_directory:
             path = self.current_date_directory()
@@ -355,14 +373,26 @@ class ImageUpload:
         else:
             path = self.config.search_directory
 
-        image = self.get_latest_image(path)
-        if not image:
+        images = self.get_latest_images(path, self.config.n_last_images)
+        if not images:
             return
 
-        self.logger.info("Newest image is %s", image)
-        if self.config.latest_uploaded == os.path.basename(image):
+        self.logger.info("Newest images are %s", images)
+        for image in images:
+            if not self.upload_image(image):
+                self.logger.warning("Unable to upload image %s", image)
+
+        self.config.latest_uploaded = [os.path.basename(image) for image in images]
+
+        self.config.write_configuration()
+
+    def upload_image(self, image):
+        ''' Uploads newest image
+        '''
+        return_val = None
+        if os.path.basename(image) in self.config.latest_uploaded:
             self.logger.info("Image %s already uploaded, will skip this one.", image)
-            return
+            return None
 
         fid = None
         foldername = ''
@@ -372,7 +402,7 @@ class ImageUpload:
             foldername, fid = self.create_missing_folder(image)
 
         if self.drive.upload_image(image, fid):
-            self.config.latest_uploaded = os.path.basename(image)
+            return_val = image
 
         if foldername not in self.config.shared_folder:
             files = self.drive.search_files(self.drive.FOLDER_MIME)
@@ -384,7 +414,8 @@ class ImageUpload:
                         self.config.shared_folder.append(foldername)
                     else:
                         self.config.shared_folder = []
-        self.config.write_configuration()
+
+        return return_val
 
     def __delete_all_files(self):
         '''
@@ -401,7 +432,7 @@ class ImageUpload:
 
         try:
             while True:
-                timer = threading.Timer(self.config.interval, self.upload_newest_image)
+                timer = threading.Timer(self.config.interval, self.upload_newest_images)
                 timer.start()
                 timer.join()
         except KeyboardInterrupt:

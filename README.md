@@ -39,6 +39,10 @@ How often do you want to check for new images in seconds.
 
 `interval = 30`
 
+Upload the n newest images.
+
+`n_latest_images = 5`
+
 The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded.
 Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
 
