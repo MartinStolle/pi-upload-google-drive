@@ -5,7 +5,7 @@ I created the project because I wanted to view the images created with the Raspb
 
 The images created are in the subfolder timelapse/year/month/day.
 
-#Requirements
+# Requirements
 
 See Google Drive API Quickstart for instructions on how to get the secrets file.
 I am using a service account key because this script runs unattended as a cronjob.
@@ -14,7 +14,7 @@ I am using a service account key because this script runs unattended as a cronjo
 - Pip `sudo apt-get install python3-pip`
 - `pip3 install --upgrade google-api-python-client`
 
-#Configuration
+# Configuration
 
 Configuration file is image-upload.config.
 
@@ -46,30 +46,30 @@ Upload the n newest images.
 The script uses the configuration to remember if the current year folder is already shared, in order to avoid the additional call, and the last image uploaded.
 Exception is, if you deleted your shared folder and want to share it again you have to delete the folder in the configuration file.
 
-#Run
+# Run
 
 `python3 image-upload.py`
 
-#Log
+# Log
 
 image-upload.log
 
-#TODO
+# TODO
 
  - Synchronize complete folder
 
-#Further reading
+# Further reading
 
-##Other Google Drive related projects
+## Other Google Drive related projects
 
 https://github.com/googledrive/PyDrive/tree/master/pydrive
 https://github.com/supersaiyanmode/gapi/blob/master/GApi4Term/core/drive.py
 
-##SDK
+## SDK
 
 https://developers.google.com/drive/v3/web/about-sdk
 https://developers.google.com/drive/v3/reference
 
-##API Dashboard
+## API Dashboard
 
 https://console.developers.google.com/apis/dashboard
